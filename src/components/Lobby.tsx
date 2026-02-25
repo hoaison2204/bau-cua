@@ -6,8 +6,8 @@ interface Props {
   rooms: RoomSummary[];
   connected: boolean;
   error: string | null;
-  onCreateRoom: (hostName: string) => void;
-  onJoinRoom: (roomId: string, playerName: string) => void;
+  onCreateRoom: (hostName: string, bankerBalance: number) => void;
+  onJoinRoom: (roomId: string, playerName: string, startingBalance: number) => void;
   onConnect: () => void;
   onDismissError: () => void;
 }
@@ -25,6 +25,8 @@ export function Lobby({
   const [name, setName] = useState(() => localStorage.getItem('bau-cua-player-name') ?? '');
   const [joinId, setJoinId] = useState('');
   const [nameError, setNameError] = useState(false);
+  const [bankerBalance, setBankerBalance] = useState(100_000);
+  const [startingBalance, setStartingBalance] = useState(10_000);
 
   useEffect(() => {
     onConnect();
@@ -41,18 +43,18 @@ export function Lobby({
 
   const handleCreate = () => {
     if (!requireName()) return;
-    onCreateRoom(name.trim());
+    onCreateRoom(name.trim(), bankerBalance);
   };
 
   const handleJoin = (roomId: string) => {
     if (!requireName()) return;
-    onJoinRoom(roomId, name.trim());
+    onJoinRoom(roomId, name.trim(), startingBalance);
   };
 
   const handleJoinById = () => {
     if (!requireName()) return;
     if (!joinId.trim()) return;
-    onJoinRoom(joinId.trim().toUpperCase(), name.trim());
+    onJoinRoom(joinId.trim().toUpperCase(), name.trim(), startingBalance);
   };
 
   const statusBadge = (s: RoomSummary['status']) => {
@@ -206,6 +208,17 @@ export function Lobby({
             {tab === 'create' && (
               <div className="space-y-3">
                 <p className="text-xs text-gray-500">Bạn sẽ là <span className="text-yellow-400 font-bold">HOST & BANKER</span>. Host không đặt cược, chỉ lắc xúc xắc.</p>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Vốn nhà cái (Banker Balance)</label>
+                  <input
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    value={bankerBalance}
+                    onChange={(e) => setBankerBalance(Math.max(1000, Number(e.target.value)))}
+                    className="w-full bg-gray-800 text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm border border-gray-700 focus:border-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500/50 transition"
+                  />
+                </div>
                 <button
                   onClick={handleCreate}
                   disabled={!name.trim() || !connected}
@@ -226,6 +239,17 @@ export function Lobby({
                   maxLength={8}
                   className="w-full bg-gray-800 text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm font-mono border border-gray-700 focus:border-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500/50 transition"
                 />
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Số tiền bắt đầu (Starting Balance)</label>
+                  <input
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    value={startingBalance}
+                    onChange={(e) => setStartingBalance(Math.max(1000, Number(e.target.value)))}
+                    className="w-full bg-gray-800 text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm border border-gray-700 focus:border-yellow-500 focus:outline-none focus:ring-1 focus:ring-yellow-500/50 transition"
+                  />
+                </div>
                 <button
                   onClick={handleJoinById}
                   disabled={!name.trim() || !joinId.trim() || !connected}

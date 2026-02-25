@@ -1,4 +1,4 @@
-﻿import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type {
   MultiplayerState,
   Player,
@@ -20,6 +20,7 @@ const initialState: MultiplayerState = {
   screen: 'lobby',
   connected: false,
   error: null,
+  isReconnecting: false,
 
   playerId: null,
   playerName: null,
@@ -29,12 +30,12 @@ const initialState: MultiplayerState = {
   hostId: null,
   hostName: null,
   status: 'waiting',
-  bankerBalance: 1_000_000,
+  bankerBalance: 10_000_000,
   bankerDelta: null,
   players: [],
   allBets: {},
   myBets: emptyBets(),
-  readyPlayers: [],
+  confirmedPlayers: [],
   dice: [randomSymbol(), randomSymbol(), randomSymbol()],
   history: [],
   currentRound: 0,
@@ -46,18 +47,36 @@ const initialState: MultiplayerState = {
   rooms: [],
 };
 
+const applyRoomState = (state: MultiplayerState, roomState: RoomState) => {
+  state.roomId = roomState.id;
+  state.hostId = roomState.hostId;
+  state.hostName = roomState.hostName;
+  state.status = roomState.status;
+  state.bankerBalance = roomState.bankerBalance;
+  state.players = roomState.players;
+  state.allBets = roomState.bets;
+  state.myBets = roomState.bets[state.playerId ?? ''] ?? emptyBets();
+  state.confirmedPlayers = roomState.confirmedPlayers;
+  state.dice = roomState.dice;
+  state.history = roomState.history;
+  state.currentRound = roomState.currentRound;
+  if (roomState.status !== 'rolling') state.isRolling = false;
+};
+
 const multiplayerSlice = createSlice({
   name: 'multiplayer',
   initialState,
   reducers: {
-    //  Connection
+    // ���� Connection ��������������������������������������������������������������������������������������������������������������������
     setConnected(state, action: PayloadAction<boolean>) {
       state.connected = action.payload;
-      if (!action.payload) {
-        state.screen = 'lobby';
-        state.roomId = null;
-        state.isHost = false;
+      if (!action.payload && !state.isReconnecting) {
+        // Don't immediately wipe room state ? allow for reconnect window
       }
+    },
+
+    setReconnecting(state, action: PayloadAction<boolean>) {
+      state.isReconnecting = action.payload;
     },
 
     setError(state, action: PayloadAction<string | null>) {
@@ -68,12 +87,12 @@ const multiplayerSlice = createSlice({
       state.error = null;
     },
 
-    //  Room list
+    // ���� Room list ����������������������������������������������������������������������������������������������������������������������
     setRoomList(state, action: PayloadAction<RoomSummary[]>) {
       state.rooms = action.payload;
     },
 
-    //  Room joined (create or join)
+    // ���� Room joined (create / join / reconnect) ����������������������������������������������������������
     roomJoined(
       state,
       action: PayloadAction<{ roomState: RoomState; yourPlayerId: string; isHost: boolean; playerName: string }>
@@ -83,41 +102,60 @@ const multiplayerSlice = createSlice({
       state.playerId = yourPlayerId;
       state.playerName = playerName;
       state.isHost = isHost;
+      state.isReconnecting = false;
 
-      state.roomId = roomState.id;
-      state.hostId = roomState.hostId;
-      state.hostName = roomState.hostName;
-      state.status = roomState.status;
-      state.bankerBalance = roomState.bankerBalance;
-      state.players = roomState.players;
-      state.allBets = roomState.bets;
-      state.myBets = roomState.bets[yourPlayerId] ?? emptyBets();
-      state.readyPlayers = roomState.readyPlayers;
-      state.dice = roomState.dice;
-      state.history = roomState.history;
-      state.currentRound = roomState.currentRound;
+      applyRoomState(state, roomState);
 
       localStorage.setItem('bau-cua-player-id', yourPlayerId);
       localStorage.setItem('bau-cua-player-name', playerName);
+      if (roomState.id) localStorage.setItem('bau-cua-last-room', roomState.id);
     },
 
-    //  Player joined
+    // ���� Full room state update ��������������������������������������������������������������������������������������������
+    roomStateUpdated(state, action: PayloadAction<RoomState>) {
+      applyRoomState(state, action.payload);
+    },
+
+    // ���� Host changed ����������������������������������������������������������������������������������������������������������������
+    hostChanged(
+      state,
+      action: PayloadAction<{ newHostId: string; newHostName: string }>
+    ) {
+      state.hostId = action.payload.newHostId;
+      state.hostName = action.payload.newHostName;
+      // If we are the new host, update isHost flag
+      if (state.playerId === action.payload.newHostId) {
+        state.isHost = true;
+      }
+    },
+
+    // ���� Player joined ��������������������������������������������������������������������������������������������������������������
     playerJoined(state, action: PayloadAction<Player>) {
       const exists = state.players.find((p) => p.id === action.payload.id);
       if (!exists) state.players.push(action.payload);
-      // When a player joins, the room is now in betting phase
       if (state.status === 'waiting') state.status = 'betting';
     },
 
-    //  Player left
+    // ���� Player left ������������������������������������������������������������������������������������������������������������������
     playerLeft(state, action: PayloadAction<string>) {
-      // Remove from list and clean up their bets/ready state
       state.players = state.players.filter((p) => p.id !== action.payload);
       delete state.allBets[action.payload];
-      state.readyPlayers = state.readyPlayers.filter((id) => id !== action.payload);
+      state.confirmedPlayers = state.confirmedPlayers.filter((id) => id !== action.payload);
     },
 
-    //  Bets updated
+    // ���� Player reconnected ����������������������������������������������������������������������������������������������������
+    playerReconnected(state, action: PayloadAction<string>) {
+      const p = state.players.find((pl) => pl.id === action.payload);
+      if (p) p.isConnected = true;
+    },
+
+    // ���� Player disconnected (temporary) ������������������������������������������������������������������������
+    playerDisconnected(state, action: PayloadAction<string>) {
+      const p = state.players.find((pl) => pl.id === action.payload);
+      if (p) p.isConnected = false;
+    },
+
+    // ���� Bets updated ����������������������������������������������������������������������������������������������������������������
     betsUpdated(
       state,
       action: PayloadAction<{ playerId: string; bets: Record<GameSymbol, number> }>
@@ -129,19 +167,19 @@ const multiplayerSlice = createSlice({
       }
     },
 
-    //  Ready update
-    readyUpdate(
+    // ���� Confirmed update ��������������������������������������������������������������������������������������������������������
+    confirmedUpdate(
       state,
-      action: PayloadAction<{ playerId: string; readyPlayers: string[] }>
+      action: PayloadAction<{ playerId: string; confirmedPlayers: string[] }>
     ) {
-      state.readyPlayers = action.payload.readyPlayers;
+      state.confirmedPlayers = action.payload.confirmedPlayers;
       state.players = state.players.map((p) => ({
         ...p,
-        isReady: action.payload.readyPlayers.includes(p.id),
+        isConfirmed: action.payload.confirmedPlayers.includes(p.id),
       }));
     },
 
-    //  Rolling
+    // ���� Rolling ��������������������������������������������������������������������������������������������������������������������������
     setRolling(state, action: PayloadAction<RoomState>) {
       state.isRolling = true;
       state.showResult = false;
@@ -149,7 +187,7 @@ const multiplayerSlice = createSlice({
       state.players = action.payload.players;
     },
 
-    //  Dice result
+    // ���� Dice result ������������������������������������������������������������������������������������������������������������������
     diceResult(
       state,
       action: PayloadAction<{
@@ -171,7 +209,7 @@ const multiplayerSlice = createSlice({
       state.bankerDelta = bankerBalance - prevBanker;
       state.history = [history, ...state.history].slice(0, 50);
       state.currentRound += 1;
-      state.readyPlayers = [];
+      state.confirmedPlayers = [];
       state.allBets = {};
       state.myBets = emptyBets();
 
@@ -179,12 +217,12 @@ const multiplayerSlice = createSlice({
       state.showResult = true;
     },
 
-    //  Hide result
+    // ���� Hide result ������������������������������������������������������������������������������������������������������������������
     hideResult(state) {
       state.showResult = false;
     },
 
-    //  Leave room
+    // ���� Leave room ��������������������������������������������������������������������������������������������������������������������
     leaveRoom(state) {
       state.screen = 'lobby';
       state.roomId = null;
@@ -194,25 +232,32 @@ const multiplayerSlice = createSlice({
       state.players = [];
       state.allBets = {};
       state.myBets = emptyBets();
-      state.readyPlayers = [];
+      state.confirmedPlayers = [];
       state.history = [];
       state.isRolling = false;
       state.showResult = false;
       state.status = 'waiting';
+      state.bankerDelta = null;
+      localStorage.removeItem('bau-cua-last-room');
     },
   },
 });
 
 export const {
   setConnected,
+  setReconnecting,
   setError,
   clearError,
   setRoomList,
   roomJoined,
+  roomStateUpdated,
+  hostChanged,
   playerJoined,
   playerLeft,
+  playerReconnected,
+  playerDisconnected,
   betsUpdated,
-  readyUpdate,
+  confirmedUpdate,
   setRolling,
   diceResult,
   hideResult,

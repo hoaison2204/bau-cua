@@ -1,33 +1,36 @@
-﻿//  Shared types: server and client 
+﻿// ── Shared types: server and client ─────────────────────────────────────────
 
 export type GameSymbol = 'bau' | 'cua' | 'tom' | 'ca' | 'nai' | 'ga';
 
 export const ALL_SYMBOLS: GameSymbol[] = ['bau', 'cua', 'tom', 'ca', 'nai', 'ga'];
 
-export const INITIAL_PLAYER_BALANCE = 1000;
-export const INITIAL_BANKER_BALANCE = 1_000_000;
-export const BET_STEP = 10;
+export const INITIAL_PLAYER_BALANCE = 1_000;
+export const INITIAL_BANKER_BALANCE = 10_000_000;
+export const BET_STEP = 100;
 export const DICE_COUNT = 3;
-export const ROLL_DURATION_MS = 2000;
+export const ROLL_DURATION_MS = 2500;
 export const MAX_HISTORY = 50;
-export const MAX_PLAYERS = 10; // excluding host
+export const MAX_PLAYERS = 10;          // excluding host
+export const DISCONNECT_TIMEOUT_MS = 45_000; // 45 seconds
 
-//  Data structures 
+// ── Data structures ──────────────────────────────────────────────────────────
 
 export interface Player {
   id: string;
   name: string;
   balance: number;
+  socketId: string;
   isConnected: boolean;
-  isReady: boolean;
+  isConfirmed: boolean;
 }
 
 export interface RoundPlayerResult {
   playerId: string;
   playerName: string;
   bets: Record<GameSymbol, number>;
-  winAmount: number;  // net profit (0 = lost all bets)
+  winAmount: number;  // gross winnings (not counting stake recovery)
   totalBet: number;
+  profit: number;     // net profit = totalReturn - totalBet (can be negative)
 }
 
 export interface RoundHistory {
@@ -50,7 +53,7 @@ export interface RoomState {
   bankerBalance: number;
   players: Player[];
   bets: Record<string, Record<GameSymbol, number>>;
-  readyPlayers: string[];
+  confirmedPlayers: string[];
   dice: GameSymbol[];
   history: RoundHistory[];
   currentRound: number;
@@ -64,27 +67,35 @@ export interface RoomSummary {
   status: RoomStatus;
 }
 
-//  Socket payloads: Client  Server 
+// ── Socket payloads: Client → Server ─────────────────────────────────────────
 
 export interface CreateRoomPayload {
   hostName: string;
+  bankerBalance?: number;
 }
 
 export interface JoinRoomPayload {
   roomId: string;
   playerName: string;
-  playerId?: string; // reconnect
+  playerId?: string;
+  startingBalance?: number;
 }
 
-export interface PlaceBetPayload {
+export interface ReconnectPlayerPayload {
+  playerId: string;
+  roomId: string;
+}
+
+export interface SetBalancePayload {
+  amount: number;
+}
+
+export interface SetBetPayload {
   symbol: GameSymbol;
+  amount: number;
 }
 
-export interface RemoveBetPayload {
-  symbol: GameSymbol;
-}
-
-//  Socket payloads: Server  Client 
+// ── Socket payloads: Server → Client ─────────────────────────────────────────
 
 export interface RoomJoinedPayload {
   roomState: RoomState;
@@ -101,9 +112,14 @@ export interface BetsUpdatedPayload {
   bets: Record<GameSymbol, number>;
 }
 
-export interface ReadyUpdatePayload {
+export interface ConfirmUpdatePayload {
   playerId: string;
-  readyPlayers: string[];
+  confirmedPlayers: string[];
+}
+
+export interface HostChangedPayload {
+  newHostId: string;
+  newHostName: string;
 }
 
 export interface DiceResultPayload {

@@ -3,13 +3,12 @@ import type { Player } from '../types/multiplayer';
 
 interface Props {
   players: Player[];
-  hostId?: string | null;
   hostName: string | null;
-  readyPlayers: string[];
+  confirmedPlayers: string[];
   currentPlayerId: string | null;
 }
 
-export function PlayerList({ players, hostName, readyPlayers, currentPlayerId }: Props) {
+export function PlayerList({ players, hostName, confirmedPlayers, currentPlayerId }: Props) {
   return (
     <div className="bg-gray-900/70 rounded-2xl border border-gray-800 p-4">
       <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">
@@ -38,25 +37,30 @@ export function PlayerList({ players, hostName, readyPlayers, currentPlayerId }:
         {/* Player rows */}
         <AnimatePresence initial={false}>
           {players.map((p) => {
-            const isReady = readyPlayers.includes(p.id);
+            const isConfirmed = confirmedPlayers.includes(p.id);
             const isMe = p.id === currentPlayerId;
+            const isOffline = !p.isConnected;
             return (
               <motion.li
                 key={p.id}
                 initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
+                animate={{ opacity: isOffline ? 0.4 : 1, x: 0 }}
                 exit={{ opacity: 0, x: -10 }}
                 className={`flex items-center gap-2.5 rounded-xl px-3 py-2 border transition-colors ${
-                  isReady
+                  isConfirmed
                     ? 'bg-green-500/10 border-green-500/20'
                     : isMe
                     ? 'bg-gray-800 border-gray-700'
                     : 'bg-gray-800/50 border-gray-800'
-                } ${!p.isConnected ? 'opacity-40' : ''}`}
+                }`}
               >
                 <span
                   className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    !p.isConnected ? 'bg-gray-600' : isReady ? 'bg-green-400 animate-pulse' : 'bg-gray-500'
+                    isOffline
+                      ? 'bg-gray-600'
+                      : isConfirmed
+                      ? 'bg-green-400 animate-pulse'
+                      : 'bg-gray-500'
                   }`}
                 />
                 <div className="flex-1 min-w-0">
@@ -71,17 +75,17 @@ export function PlayerList({ players, hostName, readyPlayers, currentPlayerId }:
                   </p>
                 </div>
 
-                {isReady && (
+                {isConfirmed && (
                   <motion.span
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     className="text-[10px] font-bold bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded uppercase"
                   >
-                     Ready
+                    Đã Đặt
                   </motion.span>
                 )}
 
-                {!p.isConnected && (
+                {isOffline && (
                   <span className="text-[10px] text-gray-600">offline</span>
                 )}
               </motion.li>

@@ -1,4 +1,4 @@
-﻿//  Shared types (mirrors server/src/types.ts) 
+﻿// ── Shared types (mirrors server/src/types.ts) ───────────────────────────
 
 export type GameSymbol = 'bau' | 'cua' | 'tom' | 'ca' | 'nai' | 'ga';
 
@@ -8,8 +8,9 @@ export interface Player {
   id: string;
   name: string;
   balance: number;
+  socketId: string;
   isConnected: boolean;
-  isReady: boolean;
+  isConfirmed: boolean;
 }
 
 export interface RoundPlayerResult {
@@ -18,6 +19,7 @@ export interface RoundPlayerResult {
   bets: Record<GameSymbol, number>;
   winAmount: number;
   totalBet: number;
+  profit: number;   // net profit = totalReturn - totalBet (negative = lost)
 }
 
 export interface RoundHistory {
@@ -40,7 +42,7 @@ export interface RoomState {
   bankerBalance: number;
   players: Player[];
   bets: Record<string, Record<GameSymbol, number>>;
-  readyPlayers: string[];
+  confirmedPlayers: string[];
   dice: GameSymbol[];
   history: RoundHistory[];
   currentRound: number;
@@ -54,7 +56,7 @@ export interface RoomSummary {
   status: RoomStatus;
 }
 
-//  Redux state 
+// ── Redux state ──────────────────────────────────────────────────────────────────────────
 
 export type AppScreen = 'lobby' | 'room';
 
@@ -64,6 +66,7 @@ export interface MultiplayerState {
   // Connection
   connected: boolean;
   error: string | null;
+  isReconnecting: boolean;
 
   // Self
   playerId: string | null;
@@ -80,7 +83,7 @@ export interface MultiplayerState {
   players: Player[];
   allBets: Record<string, Record<GameSymbol, number>>;
   myBets: Record<GameSymbol, number>;
-  readyPlayers: string[];
+  confirmedPlayers: string[];
   dice: GameSymbol[];
   history: RoundHistory[];
   currentRound: number;

@@ -34,8 +34,8 @@ function App() {
         rooms={game.rooms}
         connected={game.connected}
         error={game.error}
-        onCreateRoom={game.createRoom}
-        onJoinRoom={game.joinRoom}
+        onCreateRoom={(name, bankerBalance) => game.createRoom(name, bankerBalance)}
+        onJoinRoom={(roomId, playerName, startingBalance) => game.joinRoom(roomId, playerName, startingBalance)}
         onConnect={game.connect}
         onDismissError={game.dismissError}
       />
@@ -121,21 +121,23 @@ function App() {
               bets={game.myBets as Record<string, number>}
               winningSymbols={winningSymbols as string[]}
               isRolling={game.isRolling}
-              disabled={game.isHost || game.isRolling || game.isReady || game.status !== 'betting'}
-              onAddBet={game.addBet as (s: string) => void}
-              onRemoveBet={game.removeBet as (s: string) => void}
+              disabled={game.isHost || game.isRolling || game.isConfirmed || game.status !== 'betting'}
+              isConfirmed={game.isConfirmed}
+              playerBalance={myBalance}
+              onSetBet={(symbol, amount) => game.setBet(symbol as any, amount)}
             />
 
             {/* Controls */}
             <RoomControls
               isHost={game.isHost}
-              isReady={game.isReady}
+              isConfirmed={game.isConfirmed}
               canRoll={game.canRoll}
               isRolling={game.isRolling}
               totalBetAmount={game.totalBetAmount}
               status={game.status}
-              readyCount={game.readyPlayers.length}
-              onReady={game.setReady}
+              confirmedCount={game.confirmedPlayers.length}
+              onConfirm={game.confirmBet}
+              onUnconfirm={game.unconfirmBet}
               onRoll={game.rollDice}
               onResetBets={game.resetBets}
             />
@@ -166,9 +168,8 @@ function App() {
 
             <PlayerList
               players={game.players}
-              hostId={game.hostId}
               hostName={game.hostName}
-              readyPlayers={game.readyPlayers}
+              confirmedPlayers={game.confirmedPlayers}
               currentPlayerId={game.playerId}
             />
 
