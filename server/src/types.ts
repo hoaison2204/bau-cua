@@ -1,4 +1,4 @@
-// ─── Shared types between server and client ──────────────────────────────────
+﻿//  Shared types: server and client 
 
 export type GameSymbol = 'bau' | 'cua' | 'tom' | 'ca' | 'nai' | 'ga';
 
@@ -8,28 +8,25 @@ export const INITIAL_PLAYER_BALANCE = 1000;
 export const INITIAL_BANKER_BALANCE = 1_000_000;
 export const BET_STEP = 10;
 export const DICE_COUNT = 3;
-export const ROLL_DURATION_MS = 2000; // ms of rolling animation
+export const ROLL_DURATION_MS = 2000;
 export const MAX_HISTORY = 50;
-export const DEFAULT_ROOM = 'main';
+export const MAX_PLAYERS = 10; // excluding host
 
-// ─── Data structures ──────────────────────────────────────────────────────────
+//  Data structures 
 
 export interface Player {
   id: string;
   name: string;
   balance: number;
   isConnected: boolean;
+  isReady: boolean;
 }
 
-export interface Banker {
-  balance: number;
-}
-
-export interface RoundResult {
+export interface RoundPlayerResult {
   playerId: string;
   playerName: string;
   bets: Record<GameSymbol, number>;
-  winAmount: number; // net profit (0 = lost all bets)
+  winAmount: number;  // net profit (0 = lost all bets)
   totalBet: number;
 }
 
@@ -37,31 +34,46 @@ export interface RoundHistory {
   id: string;
   roundNumber: number;
   dice: GameSymbol[];
-  results: RoundResult[];
-  bankerDelta: number; // positive = banker gained, negative = banker paid out
-  bankerBalance: number; // snapshot after round
+  results: RoundPlayerResult[];
+  bankerDelta: number;
+  bankerBalance: number;
   timestamp: number;
 }
 
-export type RoomPhase = 'betting' | 'rolling' | 'result';
+export type RoomStatus = 'waiting' | 'betting' | 'rolling';
 
 export interface RoomState {
-  roomId: string;
-  phase: RoomPhase;
-  players: Player[];
-  bets: Record<string, Record<GameSymbol, number>>; // playerId → symbol → amount
+  id: string;
+  hostId: string;
+  hostName: string;
+  status: RoomStatus;
   bankerBalance: number;
+  players: Player[];
+  bets: Record<string, Record<GameSymbol, number>>;
+  readyPlayers: string[];
   dice: GameSymbol[];
   history: RoundHistory[];
   currentRound: number;
 }
 
-// ─── Socket event payloads ─────────────────────────────────────────────────────
+export interface RoomSummary {
+  id: string;
+  hostName: string;
+  playerCount: number;
+  maxPlayers: number;
+  status: RoomStatus;
+}
 
-// Client → Server
-export interface JoinGamePayload {
+//  Socket payloads: Client  Server 
+
+export interface CreateRoomPayload {
+  hostName: string;
+}
+
+export interface JoinRoomPayload {
+  roomId: string;
   playerName: string;
-  playerId?: string; // reconnect with same ID
+  playerId?: string; // reconnect
 }
 
 export interface PlaceBetPayload {
@@ -72,26 +84,16 @@ export interface RemoveBetPayload {
   symbol: GameSymbol;
 }
 
-// Server → Client
-export interface GameStatePayload {
+//  Socket payloads: Server  Client 
+
+export interface RoomJoinedPayload {
   roomState: RoomState;
   yourPlayerId: string;
+  isHost: boolean;
 }
 
-export interface DiceResultPayload {
-  dice: GameSymbol[];
-  results: RoundResult[];
-  history: RoundHistory;
-  bankerBalance: number;
-  updatedPlayers: Player[];
-}
-
-export interface PlayerJoinedPayload {
-  player: Player;
-}
-
-export interface PlayerLeftPayload {
-  playerId: string;
+export interface RoomListPayload {
+  rooms: RoomSummary[];
 }
 
 export interface BetsUpdatedPayload {
@@ -99,6 +101,20 @@ export interface BetsUpdatedPayload {
   bets: Record<GameSymbol, number>;
 }
 
+export interface ReadyUpdatePayload {
+  playerId: string;
+  readyPlayers: string[];
+}
+
+export interface DiceResultPayload {
+  dice: GameSymbol[];
+  results: RoundPlayerResult[];
+  history: RoundHistory;
+  bankerBalance: number;
+  updatedPlayers: Player[];
+}
+
 export interface ErrorPayload {
+  code: string;
   message: string;
 }

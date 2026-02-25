@@ -1,136 +1,132 @@
-import { useCallback } from 'react';
+﻿import { useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from './useAppStore';
-import { getSocket, connectSocket } from '../lib/socket';
+import { connectSocket, getSocket } from '../lib/socket';
 import {
-  setPlayerIdentity,
+  clearError,
   hideResult,
+  leaveRoom,
 } from '../features/game/multiplayerSlice';
-import type { GameSymbol } from '../types/multiplayer';
 import { useSoundEffects } from './useSoundEffects';
+import type { GameSymbol } from '../types/multiplayer';
 
-export const useMultiplayerGame = () => {
+export function useMultiplayerGame() {
   const dispatch = useAppDispatch();
   const state = useAppSelector((s) => s.multiplayer);
-  const { playBet, playRoll, playWin, playLose } = useSoundEffects();
+  const sounds = useSoundEffects();
 
-  // ── Join ───────────────────────────────────────────────────────────────────
-  const joinGame = useCallback(
-    (playerName: string, existingPlayerId?: string) => {
-      const socket = connectSocket();
-      const trimmed = playerName.trim();
-      if (!trimmed) return;
+  //  Actions
 
-      dispatch(setPlayerIdentity({ playerId: existingPlayerId ?? '', playerName: trimmed }));
+  const connect = useCallback(() => {
+    connectSocket();
+  }, []);
 
-      socket.emit('join_game', {
-        playerName: trimmed,
-        playerId: existingPlayerId,
-      });
-    },
-    [dispatch]
-  );
+  const createRoom = useCallback((hostName: string) => {
+    const socket = connectSocket();
+    localStorage.setItem('bau-cua-player-name', hostName);
+    socket.emit('create_room', { hostName });
+  }, []);
 
-  // ── Bet ────────────────────────────────────────────────────────────────────
+  const joinRoom = useCallback((roomId: string, playerName: string) => {
+    const socket = connectSocket();
+    const existingId = localStorage.getItem('bau-cua-player-id') ?? undefined;
+    localStorage.setItem('bau-cua-player-name', playerName);
+    socket.emit('join_room', { roomId: roomId.toUpperCase(), playerName, playerId: existingId });
+  }, []);
+
+  const getRooms = useCallback(() => {
+    const socket = getSocket();
+    socket.emit('get_rooms');
+  }, []);
+
   const addBet = useCallback(
     (symbol: GameSymbol) => {
-      if (state.isRolling) return;
-      const socket = getSocket();
-      socket.emit('place_bet', { symbol });
-      playBet();
+      if (state.isHost) return;
+      sounds.playBet();
+      getSocket().emit('place_bet', { symbol });
     },
-    [state.isRolling, playBet]
+    [state.isHost, sounds]
   );
 
   const removeBet = useCallback(
     (symbol: GameSymbol) => {
-      if (state.isRolling) return;
-      const socket = getSocket();
-      socket.emit('remove_bet', { symbol });
+      if (state.isHost) return;
+      getSocket().emit('remove_bet', { symbol });
     },
-    [state.isRolling]
+    [state.isHost]
   );
 
   const resetBets = useCallback(() => {
-    if (state.isRolling) return;
+    if (state.isHost) return;
     getSocket().emit('reset_bet');
-  }, [state.isRolling]);
+  }, [state.isHost]);
 
-  // ── Roll ───────────────────────────────────────────────────────────────────
+  const setReady = useCallback(() => {
+    if (state.isHost) return;
+    getSocket().emit('player_ready');
+  }, [state.isHost]);
+
   const rollDice = useCallback(() => {
-    const totalBet = Object.values(state.myBets).reduce((a, b) => a + b, 0);
-    const me = state.players.find((p) => p.id === state.playerId);
-    if (state.isRolling || totalBet === 0 || !me || me.balance < totalBet) return;
-
+    if (!state.isHost) return;
+    sounds.playRoll();
     getSocket().emit('roll_dice');
-    playRoll();
-  }, [state.isRolling, state.myBets, state.players, state.playerId, playRoll]);
+  }, [state.isHost, sounds]);
 
-  // ── Result sounds (triggered when dice_result arrives) ────────────────────
-  const handleResultSound = useCallback(() => {
-    if (!state.playerId) return;
-    const myResult = state.lastResults.find((r) => r.playerId === state.playerId);
-    if (myResult && myResult.winAmount > 0) {
-      playWin();
-    } else if (myResult && myResult.totalBet > 0) {
-      playLose();
-    }
-  }, [state.playerId, state.lastResults, playWin, playLose]);
-
-  const handleHideResult = useCallback(() => {
+  const doHideResult = useCallback(() => {
     dispatch(hideResult());
   }, [dispatch]);
 
-  // ── Computed ───────────────────────────────────────────────────────────────
-  const myPlayer = state.players.find((p) => p.id === state.playerId);
-  const totalBetAmount = Object.values(state.myBets).reduce((a, b) => a + b, 0);
-  const canRoll =
-    !state.isRolling && totalBetAmount > 0 && !!myPlayer && myPlayer.balance >= totalBetAmount;
+  const doLeaveRoom = useCallback(() => {
+    dispatch(leaveRoom());
+    getSocket().emit('leave_room');
+  }, [dispatch]);
 
-  const myResult = state.lastResults.find((r) => r.playerId === state.playerId) ?? null;
+  const dismissError = useCallback(() => {
+    dispatch(clearError());
+  }, [dispatch]);
+
+  const handleResultSound = useCallback(() => {
+    const myResult = state.lastResults.find((r) => r.playerId === state.playerId);
+    if (myResult && myResult.winAmount > 0) {
+      sounds.playWin();
+    } else if (myResult && myResult.totalBet > 0) {
+      sounds.playLose();
+    }
+  }, [state.lastResults, state.playerId, sounds]);
+
+  //  Computed
+
+  const myPlayer = state.players.find((p) => p.id === state.playerId);
+  const isReady = state.readyPlayers.includes(state.playerId ?? '');
+  const totalBetAmount = Object.values(state.myBets).reduce((a, b) => a + b, 0);
+  const myResult = state.lastResults.find((r) => r.playerId === state.playerId);
+  const canRoll =
+    state.isHost &&
+    state.status !== 'rolling' &&
+    state.readyPlayers.length > 0 &&
+    !state.isRolling;
 
   return {
-    // Identity
-    playerId: state.playerId,
-    playerName: state.playerName,
-    hasJoined: state.hasJoined,
-    connected: state.connected,
-
-    // Room
-    phase: state.phase,
-    players: state.players,
-    allBets: state.allBets,
-    myBets: state.myBets,
-    bankerBalance: state.bankerBalance,
-    bankerDelta: state.bankerDelta,
-
-    // Dice
-    dice: state.dice,
-    isRolling: state.isRolling,
-
-    // History
-    history: state.history,
-    currentRound: state.currentRound,
-
-    // Results
-    lastResults: state.lastResults,
-    showResult: state.showResult,
-    myResult,
-
-    // Derived
+    // State
+    ...state,
     myPlayer,
+    isReady,
     totalBetAmount,
+    myResult,
     canRoll,
 
-    // Error
-    error: state.error,
-
     // Actions
-    joinGame,
+    connect,
+    createRoom,
+    joinRoom,
+    getRooms,
     addBet,
     removeBet,
     resetBets,
+    setReady,
     rollDice,
+    hideResult: doHideResult,
+    leaveRoom: doLeaveRoom,
+    dismissError,
     handleResultSound,
-    hideResult: handleHideResult,
   };
-};
+}

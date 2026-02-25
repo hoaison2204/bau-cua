@@ -1,91 +1,119 @@
-import { v4 as uuidv4 } from 'uuid';
+﻿import { v4 as uuidv4 } from 'uuid';
 import {
   ALL_SYMBOLS,
   DICE_COUNT,
   INITIAL_BANKER_BALANCE,
   INITIAL_PLAYER_BALANCE,
   MAX_HISTORY,
+  MAX_PLAYERS,
 } from './types';
 import type {
   GameSymbol,
   Player,
   RoomState,
+  RoomStatus,
+  RoomSummary,
   RoundHistory,
-  RoundResult,
+  RoundPlayerResult,
 } from './types';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+//  Helpers 
 
 const randomSymbol = (): GameSymbol =>
   ALL_SYMBOLS[Math.floor(Math.random() * ALL_SYMBOLS.length)];
 
 const rollDice = (): GameSymbol[] =>
-  Array.from({ length: DICE_COUNT }, () => randomSymbol());
+  Array.from({ length: DICE_COUNT }, randomSymbol);
 
 const emptyBets = (): Record<GameSymbol, number> =>
   ALL_SYMBOLS.reduce((acc, s) => ({ ...acc, [s]: 0 }), {} as Record<GameSymbol, number>);
 
-// ─── Room engine ──────────────────────────────────────────────────────────────
+//  GameRoom 
 
 export class GameRoom {
-  public roomId: string;
-  private players: Map<string, Player> = new Map();
-  private bets: Map<string, Record<GameSymbol, number>> = new Map();
-  private bankerBalance: number = INITIAL_BANKER_BALANCE;
+  public readonly id: string;
+  public readonly hostId: string;
+  public readonly hostName: string;
+
+  private players = new Map<string, Player>();
+  private bets = new Map<string, Record<GameSymbol, number>>();
+  private readyPlayers = new Set<string>();
+  private bankerBalance = INITIAL_BANKER_BALANCE;
   private dice: GameSymbol[] = [randomSymbol(), randomSymbol(), randomSymbol()];
   private history: RoundHistory[] = [];
-  private currentRound: number = 0;
-  private phase: RoomState['phase'] = 'betting';
+  private currentRound = 0;
+  private status: RoomStatus = 'waiting';
 
-  constructor(roomId: string) {
-    this.roomId = roomId;
+  constructor(id: string, hostId: string, hostName: string) {
+    this.id = id;
+    this.hostId = hostId;
+    this.hostName = hostName;
   }
 
-  // ── Player management ──────────────────────────────────────────────────────
+  //  Capacity 
 
-  addPlayer(id: string, name: string): Player {
+  isFull(): boolean {
+    return this.players.size >= MAX_PLAYERS;
+  }
+
+  isHost(playerId: string): boolean {
+    return playerId === this.hostId;
+  }
+
+  //  Player management 
+
+  addPlayer(id: string, name: string): { ok: boolean; player?: Player; error?: string } {
+    if (this.isHost(id)) {
+      // Host re-joined (reconnect)
+      return { ok: true };
+    }
     const existing = this.players.get(id);
     if (existing) {
       existing.isConnected = true;
-      return existing;
+      return { ok: true, player: existing };
+    }
+    if (this.isFull()) {
+      return { ok: false, error: 'room_full' };
     }
     const player: Player = {
       id,
       name,
       balance: INITIAL_PLAYER_BALANCE,
       isConnected: true,
+      isReady: false,
     };
     this.players.set(id, player);
     this.bets.set(id, emptyBets());
-    return player;
+    this.status = 'betting';
+    return { ok: true, player };
   }
 
   disconnectPlayer(id: string): void {
+    if (this.isHost(id)) return; // host disconnect handled elsewhere
     const p = this.players.get(id);
     if (p) p.isConnected = false;
-  }
-
-  removePlayer(id: string): void {
-    this.players.delete(id);
-    this.bets.delete(id);
   }
 
   getPlayer(id: string): Player | undefined {
     return this.players.get(id);
   }
 
-  // ── Betting ────────────────────────────────────────────────────────────────
+  get playerCount(): number {
+    return this.players.size;
+  }
+
+  //  Betting 
 
   placeBet(playerId: string, symbol: GameSymbol): { ok: boolean; error?: string } {
-    if (this.phase !== 'betting') return { ok: false, error: 'Not in betting phase' };
-
+    if (this.isHost(playerId)) return { ok: false, error: 'Host cannot bet' };
+    if (this.status !== 'betting') return { ok: false, error: 'Not in betting phase' };
     const player = this.players.get(playerId);
     if (!player) return { ok: false, error: 'Player not found' };
+    if (player.isReady) return { ok: false, error: 'Already ready, cannot change bet' };
 
     const bets = this.bets.get(playerId) ?? emptyBets();
-    const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
-
-    if (player.balance - totalBet < 10) return { ok: false, error: 'Insufficient balance' };
+    const spent = Object.values(bets).reduce((a, b) => a + b, 0);
+    if (player.balance - spent < 10) return { ok: false, error: 'Insufficient balance' };
 
     bets[symbol] += 10;
     this.bets.set(playerId, bets);
@@ -93,45 +121,91 @@ export class GameRoom {
   }
 
   removeBet(playerId: string, symbol: GameSymbol): { ok: boolean; error?: string } {
-    if (this.phase !== 'betting') return { ok: false, error: 'Not in betting phase' };
+    if (this.isHost(playerId)) return { ok: false, error: 'Host cannot bet' };
+    if (this.status !== 'betting') return { ok: false, error: 'Not in betting phase' };
+    const player = this.players.get(playerId);
+    if (!player) return { ok: false, error: 'Player not found' };
+    if (player.isReady) return { ok: false, error: 'Already ready, cannot change bet' };
 
     const bets = this.bets.get(playerId) ?? emptyBets();
     if (bets[symbol] < 10) return { ok: false, error: 'No bet to remove' };
-
     bets[symbol] -= 10;
     this.bets.set(playerId, bets);
     return { ok: true };
   }
 
-  resetBets(playerId: string): void {
-    if (this.phase === 'betting') {
-      this.bets.set(playerId, emptyBets());
-    }
+  resetBets(playerId: string): { ok: boolean; error?: string } {
+    if (this.isHost(playerId)) return { ok: false, error: 'Host cannot bet' };
+    if (this.status !== 'betting') return { ok: false, error: 'Not in betting phase' };
+    const player = this.players.get(playerId);
+    if (!player) return { ok: false, error: 'Player not found' };
+    if (player.isReady) return { ok: false, error: 'Already ready, cannot change bet' };
+
+    this.bets.set(playerId, emptyBets());
+    return { ok: true };
   }
 
-  // ── Rolling ────────────────────────────────────────────────────────────────
+  getBetsForPlayer(playerId: string): Record<GameSymbol, number> {
+    return this.bets.get(playerId) ?? emptyBets();
+  }
 
-  /** Start a roll: deduct all bets, set phase to rolling */
-  startRoll(): { ok: boolean; error?: string } {
-    if (this.phase !== 'betting') return { ok: false, error: 'Already rolling' };
+  //  Ready system 
 
-    // Deduct bets from player balances
+  setReady(playerId: string): { ok: boolean; error?: string } {
+    if (this.isHost(playerId)) return { ok: false, error: 'Host cannot ready' };
+    if (this.status !== 'betting') return { ok: false, error: 'Not in betting phase' };
+    const player = this.players.get(playerId);
+    if (!player) return { ok: false, error: 'Player not found' };
+
+    const bets = this.bets.get(playerId) ?? emptyBets();
+    const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
+    if (totalBet === 0) return { ok: false, error: 'Place a bet before readying' };
+
+    player.isReady = true;
+    this.readyPlayers.add(playerId);
+    return { ok: true };
+  }
+
+  unsetReady(playerId: string): void {
+    const player = this.players.get(playerId);
+    if (player) player.isReady = false;
+    this.readyPlayers.delete(playerId);
+  }
+
+  getReadyPlayers(): string[] {
+    return Array.from(this.readyPlayers);
+  }
+
+  //  Roll 
+
+  startRoll(requesterId: string): { ok: boolean; error?: string } {
+    if (!this.isHost(requesterId)) return { ok: false, error: 'Only host can roll' };
+    if (this.status !== 'betting') return { ok: false, error: 'Already rolling' };
+    if (this.readyPlayers.size === 0) return { ok: false, error: 'No players ready' };
+
+    // Deduct bets from READY players only; refund others
     for (const [playerId, bets] of this.bets.entries()) {
       const player = this.players.get(playerId);
       if (!player) continue;
       const total = Object.values(bets).reduce((a, b) => a + b, 0);
-      player.balance -= total;
-      this.bankerBalance += total;
+      if (total === 0) continue;
+
+      if (this.readyPlayers.has(playerId)) {
+        player.balance -= total;
+        this.bankerBalance += total;
+      } else {
+        // Not ready  bets are discarded (refund already in balance since we only deduct here)
+        this.bets.set(playerId, emptyBets());
+      }
     }
 
-    this.phase = 'rolling';
+    this.status = 'rolling';
     return { ok: true };
   }
 
-  /** Finish roll: roll dice, calculate results, update balances */
   finishRoll(): {
     dice: GameSymbol[];
-    results: RoundResult[];
+    results: RoundPlayerResult[];
     history: RoundHistory;
     bankerBalance: number;
     updatedPlayers: Player[];
@@ -139,19 +213,20 @@ export class GameRoom {
     this.dice = rollDice();
     this.currentRound += 1;
 
-    const results: RoundResult[] = [];
+    const results: RoundPlayerResult[] = [];
     let bankerPayout = 0;
 
-    for (const [playerId, bets] of this.bets.entries()) {
+    for (const playerId of this.readyPlayers) {
       const player = this.players.get(playerId);
-      if (!player) continue;
+      const bets = this.bets.get(playerId);
+      if (!player || !bets) continue;
 
       const totalBet = Object.values(bets).reduce((a, b) => a + b, 0);
       if (totalBet === 0) continue;
 
-      // Calculate winnings
       let winAmount = 0;
       let totalReturn = 0;
+
       for (const symbol of ALL_SYMBOLS) {
         const bet = bets[symbol];
         if (bet <= 0) continue;
@@ -159,7 +234,7 @@ export class GameRoom {
         if (matchCount > 0) {
           const profit = bet * matchCount;
           winAmount += profit;
-          totalReturn += profit + bet; // profit + original bet refund
+          totalReturn += profit + bet;
         }
       }
 
@@ -176,14 +251,13 @@ export class GameRoom {
     }
 
     this.bankerBalance -= bankerPayout;
-    const bankerDelta = this.getBetTotal() - bankerPayout;
 
     const historyEntry: RoundHistory = {
       id: uuidv4(),
       roundNumber: this.currentRound,
       dice: [...this.dice],
       results,
-      bankerDelta,
+      bankerDelta: 0 - bankerPayout + this.getTotalBetByReadyPlayers(),
       bankerBalance: this.bankerBalance,
       timestamp: Date.now(),
     };
@@ -191,12 +265,16 @@ export class GameRoom {
     this.history.unshift(historyEntry);
     if (this.history.length > MAX_HISTORY) this.history.length = MAX_HISTORY;
 
-    // Reset bets after round
+    // Reset ready + bets
+    for (const player of this.players.values()) {
+      player.isReady = false;
+    }
+    this.readyPlayers.clear();
     for (const playerId of this.bets.keys()) {
       this.bets.set(playerId, emptyBets());
     }
 
-    this.phase = 'betting';
+    this.status = 'betting';
 
     return {
       dice: this.dice,
@@ -207,43 +285,70 @@ export class GameRoom {
     };
   }
 
-  // ── State snapshot ─────────────────────────────────────────────────────────
+  private getTotalBetByReadyPlayers(): number {
+    let total = 0;
+    for (const playerId of this.readyPlayers) {
+      const bets = this.bets.get(playerId);
+      if (bets) total += Object.values(bets).reduce((a, b) => a + b, 0);
+    }
+    return total;
+  }
+
+  //  Summary & state 
+
+  getSummary(): RoomSummary {
+    return {
+      id: this.id,
+      hostName: this.hostName,
+      playerCount: this.players.size,
+      maxPlayers: MAX_PLAYERS,
+      status: this.status,
+    };
+  }
 
   getState(): RoomState {
     return {
-      roomId: this.roomId,
-      phase: this.phase,
+      id: this.id,
+      hostId: this.hostId,
+      hostName: this.hostName,
+      status: this.status,
+      bankerBalance: this.bankerBalance,
       players: Array.from(this.players.values()),
       bets: Object.fromEntries(
         Array.from(this.bets.entries()).map(([pid, b]) => [pid, { ...b }])
       ),
-      bankerBalance: this.bankerBalance,
+      readyPlayers: Array.from(this.readyPlayers),
       dice: [...this.dice],
       history: this.history.slice(0, MAX_HISTORY),
       currentRound: this.currentRound,
     };
   }
-
-  getBetsForPlayer(playerId: string): Record<GameSymbol, number> {
-    return this.bets.get(playerId) ?? emptyBets();
-  }
-
-  private getBetTotal(): number {
-    let total = 0;
-    for (const bets of this.bets.values()) {
-      total += Object.values(bets).reduce((a, b) => a + b, 0);
-    }
-    return total;
-  }
 }
 
-// ─── Room registry ─────────────────────────────────────────────────────────
+//  Room registry 
 
 const rooms = new Map<string, GameRoom>();
 
-export const getOrCreateRoom = (roomId: string): GameRoom => {
-  if (!rooms.has(roomId)) {
-    rooms.set(roomId, new GameRoom(roomId));
+const generateRoomId = (): string => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = '';
+  for (let i = 0; i < 6; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
   }
-  return rooms.get(roomId)!;
+  return rooms.has(id) ? generateRoomId() : id;
 };
+
+export const createRoom = (hostId: string, hostName: string): GameRoom => {
+  const id = generateRoomId();
+  const room = new GameRoom(id, hostId, hostName);
+  rooms.set(id, room);
+  return room;
+};
+
+export const getRoom = (id: string): GameRoom | undefined => rooms.get(id);
+
+export const deleteRoom = (id: string): void => {
+  rooms.delete(id);
+};
+
+export const getAllRooms = (): GameRoom[] => Array.from(rooms.values());

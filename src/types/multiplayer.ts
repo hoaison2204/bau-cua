@@ -1,15 +1,18 @@
-// ─── Shared types (mirrors server/src/types.ts) ───────────────────────────────
+﻿//  Shared types (mirrors server/src/types.ts) 
 
 export type GameSymbol = 'bau' | 'cua' | 'tom' | 'ca' | 'nai' | 'ga';
+
+export const ALL_SYMBOLS: GameSymbol[] = ['bau', 'cua', 'tom', 'ca', 'nai', 'ga'];
 
 export interface Player {
   id: string;
   name: string;
   balance: number;
   isConnected: boolean;
+  isReady: boolean;
 }
 
-export interface RoundResult {
+export interface RoundPlayerResult {
   playerId: string;
   playerName: string;
   bets: Record<GameSymbol, number>;
@@ -21,68 +24,72 @@ export interface RoundHistory {
   id: string;
   roundNumber: number;
   dice: GameSymbol[];
-  results: RoundResult[];
+  results: RoundPlayerResult[];
   bankerDelta: number;
   bankerBalance: number;
   timestamp: number;
 }
 
-export type RoomPhase = 'betting' | 'rolling' | 'result';
+export type RoomStatus = 'waiting' | 'betting' | 'rolling';
 
 export interface RoomState {
-  roomId: string;
-  phase: RoomPhase;
+  id: string;
+  hostId: string;
+  hostName: string;
+  status: RoomStatus;
+  bankerBalance: number;
   players: Player[];
   bets: Record<string, Record<GameSymbol, number>>;
-  bankerBalance: number;
+  readyPlayers: string[];
   dice: GameSymbol[];
   history: RoundHistory[];
   currentRound: number;
 }
 
-// ─── Redux multiplayer state ──────────────────────────────────────────────────
+export interface RoomSummary {
+  id: string;
+  hostName: string;
+  playerCount: number;
+  maxPlayers: number;
+  status: RoomStatus;
+}
+
+//  Redux state 
+
+export type AppScreen = 'lobby' | 'room';
 
 export interface MultiplayerState {
-  // Self
-  playerId: string | null;
-  playerName: string | null;
-  hasJoined: boolean;
-
-  // Room
-  phase: RoomPhase;
-  players: Player[];
-  allBets: Record<string, Record<GameSymbol, number>>; // all players' bets
-  myBets: Record<GameSymbol, number>;
-  bankerBalance: number;
-  bankerDelta: number | null; // last round delta
-
-  // Dice
-  dice: GameSymbol[];
-  isRolling: boolean;
-
-  // History
-  history: RoundHistory[];
-  currentRound: number;
-
-  // Last round
-  lastResults: RoundResult[];
-  showResult: boolean;
+  screen: AppScreen;
 
   // Connection
   connected: boolean;
   error: string | null;
-}
 
-// ─── Legacy single player state (kept for BetTile / Die components) ───────────
+  // Self
+  playerId: string | null;
+  playerName: string | null;
+  isHost: boolean;
 
-export interface GameState {
-  balance: number;
-  bets: Record<GameSymbol, number>;
+  // Room
+  roomId: string | null;
+  hostId: string | null;
+  hostName: string | null;
+  status: RoomStatus;
+  bankerBalance: number;
+  bankerDelta: number | null;
+  players: Player[];
+  allBets: Record<string, Record<GameSymbol, number>>;
+  myBets: Record<GameSymbol, number>;
+  readyPlayers: string[];
   dice: GameSymbol[];
+  history: RoundHistory[];
+  currentRound: number;
   isRolling: boolean;
-  lastResult: 'win' | 'lose' | null;
-  winAmount: number;
-  totalBet: number;
+
+  // Result
+  lastResults: RoundPlayerResult[];
   showResult: boolean;
-  previousBalance: number;
+
+  // Lobby
+  rooms: RoomSummary[];
 }

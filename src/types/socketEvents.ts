@@ -1,5 +1,5 @@
 // Mirror of server-side socket event payloads
-import type { Player, RoomState, RoundHistory, RoundResult, GameSymbol } from './multiplayer';
+import type { Player, RoomState, RoundHistory, RoundPlayerResult, GameSymbol } from './multiplayer';
 
 export interface GameStatePayload {
   roomState: RoomState;
@@ -8,7 +8,7 @@ export interface GameStatePayload {
 
 export interface DiceResultPayload {
   dice: GameSymbol[];
-  results: RoundResult[];
+  results: RoundPlayerResult[];
   history: RoundHistory;
   bankerBalance: number;
   updatedPlayers: Player[];

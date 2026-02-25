@@ -1,10 +1,11 @@
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+﻿import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type {
   MultiplayerState,
   Player,
   RoomState,
+  RoomSummary,
   RoundHistory,
-  RoundResult,
+  RoundPlayerResult,
   GameSymbol,
 } from '../../types/multiplayer';
 import { ALL_SYMBOLS } from '../../constants/symbols';
@@ -16,149 +17,188 @@ const randomSymbol = (): GameSymbol =>
   ALL_SYMBOLS[Math.floor(Math.random() * ALL_SYMBOLS.length)];
 
 const initialState: MultiplayerState = {
+  screen: 'lobby',
+  connected: false,
+  error: null,
+
   playerId: null,
   playerName: null,
-  hasJoined: false,
+  isHost: false,
 
-  phase: 'betting',
+  roomId: null,
+  hostId: null,
+  hostName: null,
+  status: 'waiting',
+  bankerBalance: 1_000_000,
+  bankerDelta: null,
   players: [],
   allBets: {},
   myBets: emptyBets(),
-  bankerBalance: 1_000_000,
-  bankerDelta: null,
-
+  readyPlayers: [],
   dice: [randomSymbol(), randomSymbol(), randomSymbol()],
-  isRolling: false,
-
   history: [],
   currentRound: 0,
+  isRolling: false,
 
   lastResults: [],
   showResult: false,
 
-  connected: false,
-  error: null,
+  rooms: [],
 };
 
 const multiplayerSlice = createSlice({
   name: 'multiplayer',
   initialState,
   reducers: {
-    // ── Connection ────────────────────────────────────────────────────────────
+    //  Connection
     setConnected(state, action: PayloadAction<boolean>) {
       state.connected = action.payload;
-      if (!action.payload) state.hasJoined = false;
+      if (!action.payload) {
+        state.screen = 'lobby';
+        state.roomId = null;
+        state.isHost = false;
+      }
     },
 
     setError(state, action: PayloadAction<string | null>) {
       state.error = action.payload;
     },
 
-    // ── Join ──────────────────────────────────────────────────────────────────
-    setPlayerIdentity(state, action: PayloadAction<{ playerId: string; playerName: string }>) {
-      state.playerId = action.payload.playerId;
-      state.playerName = action.payload.playerName;
+    clearError(state) {
+      state.error = null;
     },
 
-    setHasJoined(state, action: PayloadAction<boolean>) {
-      state.hasJoined = action.payload;
+    //  Room list
+    setRoomList(state, action: PayloadAction<RoomSummary[]>) {
+      state.rooms = action.payload;
     },
 
-    // ── Full room state sync (on join) ────────────────────────────────────────
-    syncRoomState(
+    //  Room joined (create or join)
+    roomJoined(
       state,
-      action: PayloadAction<{ roomState: RoomState; yourPlayerId: string }>
+      action: PayloadAction<{ roomState: RoomState; yourPlayerId: string; isHost: boolean; playerName: string }>
     ) {
-      const { roomState, yourPlayerId } = action.payload;
+      const { roomState, yourPlayerId, isHost, playerName } = action.payload;
+      state.screen = 'room';
       state.playerId = yourPlayerId;
-      state.phase = roomState.phase;
+      state.playerName = playerName;
+      state.isHost = isHost;
+
+      state.roomId = roomState.id;
+      state.hostId = roomState.hostId;
+      state.hostName = roomState.hostName;
+      state.status = roomState.status;
+      state.bankerBalance = roomState.bankerBalance;
       state.players = roomState.players;
       state.allBets = roomState.bets;
       state.myBets = roomState.bets[yourPlayerId] ?? emptyBets();
-      state.bankerBalance = roomState.bankerBalance;
+      state.readyPlayers = roomState.readyPlayers;
       state.dice = roomState.dice;
       state.history = roomState.history;
       state.currentRound = roomState.currentRound;
-      state.hasJoined = true;
-      state.isRolling = roomState.phase === 'rolling';
-      // Persist player ID for reconnection
-      try { localStorage.setItem('bau-cua-player-id', yourPlayerId); } catch { /* ignore */ }
+
+      localStorage.setItem('bau-cua-player-id', yourPlayerId);
+      localStorage.setItem('bau-cua-player-name', playerName);
     },
 
-    // ── Players ───────────────────────────────────────────────────────────────
-    playerJoined(state, action: PayloadAction<{ player: Player }>) {
-      const exists = state.players.find((p) => p.id === action.payload.player.id);
-      if (!exists) {
-        state.players.push(action.payload.player);
-      } else {
-        Object.assign(exists, action.payload.player);
-      }
+    //  Player joined
+    playerJoined(state, action: PayloadAction<Player>) {
+      const exists = state.players.find((p) => p.id === action.payload.id);
+      if (!exists) state.players.push(action.payload);
+      // When a player joins, the room is now in betting phase
+      if (state.status === 'waiting') state.status = 'betting';
     },
 
-    playerLeft(state, action: PayloadAction<{ playerId: string }>) {
-      const player = state.players.find((p) => p.id === action.payload.playerId);
-      if (player) player.isConnected = false;
+    //  Player left
+    playerLeft(state, action: PayloadAction<string>) {
+      // Remove from list and clean up their bets/ready state
+      state.players = state.players.filter((p) => p.id !== action.payload);
+      delete state.allBets[action.payload];
+      state.readyPlayers = state.readyPlayers.filter((id) => id !== action.payload);
     },
 
-    updatePlayers(state, action: PayloadAction<Player[]>) {
-      state.players = action.payload;
-    },
-
-    // ── Bets ──────────────────────────────────────────────────────────────────
+    //  Bets updated
     betsUpdated(
       state,
       action: PayloadAction<{ playerId: string; bets: Record<GameSymbol, number> }>
     ) {
       const { playerId, bets } = action.payload;
       state.allBets = { ...state.allBets, [playerId]: bets };
-      if (state.playerId === playerId) {
+      if (playerId === state.playerId) {
         state.myBets = bets;
       }
     },
 
-    // ── Rolling ───────────────────────────────────────────────────────────────
-    setRolling(state) {
-      state.isRolling = true;
-      state.phase = 'rolling';
-      state.showResult = false;
-      state.error = null;
+    //  Ready update
+    readyUpdate(
+      state,
+      action: PayloadAction<{ playerId: string; readyPlayers: string[] }>
+    ) {
+      state.readyPlayers = action.payload.readyPlayers;
+      state.players = state.players.map((p) => ({
+        ...p,
+        isReady: action.payload.readyPlayers.includes(p.id),
+      }));
     },
 
-    // ── Result ────────────────────────────────────────────────────────────────
+    //  Rolling
+    setRolling(state, action: PayloadAction<RoomState>) {
+      state.isRolling = true;
+      state.showResult = false;
+      state.status = 'rolling';
+      state.players = action.payload.players;
+    },
+
+    //  Dice result
     diceResult(
       state,
       action: PayloadAction<{
         dice: GameSymbol[];
-        results: RoundResult[];
+        results: RoundPlayerResult[];
         history: RoundHistory;
         bankerBalance: number;
         updatedPlayers: Player[];
       }>
     ) {
       const { dice, results, history, bankerBalance, updatedPlayers } = action.payload;
+      const prevBanker = state.bankerBalance;
 
-      state.dice = dice;
       state.isRolling = false;
-      state.phase = 'betting';
+      state.status = 'betting';
+      state.dice = dice;
+      state.players = updatedPlayers;
+      state.bankerBalance = bankerBalance;
+      state.bankerDelta = bankerBalance - prevBanker;
+      state.history = [history, ...state.history].slice(0, 50);
+      state.currentRound += 1;
+      state.readyPlayers = [];
+      state.allBets = {};
+      state.myBets = emptyBets();
+
       state.lastResults = results;
       state.showResult = true;
-      state.bankerBalance = bankerBalance;
-      state.bankerDelta = history.bankerDelta;
-      state.players = updatedPlayers;
-      state.currentRound = history.roundNumber;
-
-      // Update balances in player list and myBets reset
-      if (state.playerId) {
-        state.myBets = emptyBets();
-        state.allBets = { ...state.allBets, [state.playerId]: emptyBets() };
-      }
-
-      // Prepend to history
-      state.history = [history, ...state.history].slice(0, 50);
     },
 
+    //  Hide result
     hideResult(state) {
       state.showResult = false;
+    },
+
+    //  Leave room
+    leaveRoom(state) {
+      state.screen = 'lobby';
+      state.roomId = null;
+      state.hostId = null;
+      state.hostName = null;
+      state.isHost = false;
+      state.players = [];
+      state.allBets = {};
+      state.myBets = emptyBets();
+      state.readyPlayers = [];
+      state.history = [];
+      state.isRolling = false;
+      state.showResult = false;
+      state.status = 'waiting';
     },
   },
 });
@@ -166,16 +206,17 @@ const multiplayerSlice = createSlice({
 export const {
   setConnected,
   setError,
-  setPlayerIdentity,
-  setHasJoined,
-  syncRoomState,
+  clearError,
+  setRoomList,
+  roomJoined,
   playerJoined,
   playerLeft,
-  updatePlayers,
   betsUpdated,
+  readyUpdate,
   setRolling,
   diceResult,
   hideResult,
+  leaveRoom,
 } = multiplayerSlice.actions;
 
 export default multiplayerSlice.reducer;

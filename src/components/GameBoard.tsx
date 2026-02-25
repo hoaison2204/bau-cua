@@ -1,19 +1,20 @@
 import { BetTile } from './BetTile';
 import { SYMBOLS } from '../constants/symbols';
-import type { GameSymbol } from '../types/game';
 
 interface GameBoardProps {
-  bets: Record<GameSymbol, number>;
-  winningSymbols: GameSymbol[];
+  bets: Record<string, number>;
+  winningSymbols: string[];
   isRolling: boolean;
-  onAddBet: (symbol: GameSymbol) => void;
-  onRemoveBet: (symbol: GameSymbol) => void;
+  disabled?: boolean;
+  onAddBet: (symbol: string) => void;
+  onRemoveBet: (symbol: string) => void;
 }
 
 export const GameBoard: React.FC<GameBoardProps> = ({
   bets,
   winningSymbols,
   isRolling,
+  disabled = false,
   onAddBet,
   onRemoveBet,
 }) => {
@@ -41,9 +42,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             symbol={symbol}
             betAmount={bets[symbol.id]}
             isWinning={winningSymbols.includes(symbol.id)}
-            isRolling={isRolling}
-            onAddBet={() => onAddBet(symbol.id)}
-            onRemoveBet={() => onRemoveBet(symbol.id)}
+            isRolling={isRolling || disabled}
+            onAddBet={disabled ? () => {} : () => onAddBet(symbol.id)}
+            onRemoveBet={disabled ? () => {} : () => onRemoveBet(symbol.id)}
           />
         ))}
       </div>

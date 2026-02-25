@@ -1,90 +1,77 @@
+﻿import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { Balance } from './Balance';
 
-interface BankerBalanceProps {
+interface Props {
   balance: number;
-  delta: number | null; // null if no round played yet
+  delta: number | null;
+  hostName: string | null;
+  roomId: string | null;
 }
 
-export const BankerBalance: React.FC<BankerBalanceProps> = ({ balance, delta }) => {
-  const [display, setDisplay] = useState(balance);
-  const prevRef = useRef(balance);
-  const rafRef = useRef<number | null>(null);
+export function BankerBalance({ balance, delta, hostName, roomId }: Props) {
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    const from = prevRef.current;
-    const to = balance;
-    if (from === to) return;
-
-    const start = performance.now();
-    const duration = 700;
-
-    const tick = (now: number) => {
-      const t = Math.min((now - start) / duration, 1);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(Math.round(from + (to - from) * eased));
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        setDisplay(to);
-      }
-    };
-
-    rafRef.current = requestAnimationFrame(tick);
-    prevRef.current = balance;
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [balance]);
-
-  const isGain = delta !== null && delta > 0;
-  const isLoss = delta !== null && delta < 0;
-
+  const copyRoomId = () => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
   return (
-    <div className="flex flex-col gap-2">
-      {/* Header */}
-      <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">
-        🏦 Nhà Cái
-      </span>
-
-      {/* Balance card */}
-      <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/5 p-3 flex flex-col gap-1">
-        <span className="text-xs text-gray-500">Số dư nhà cái</span>
-        <motion.div
-          key={balance}
-          className={`text-xl font-black ${
-            isGain ? 'text-green-400' : isLoss ? 'text-red-400' : 'text-yellow-300'
-          }`}
-          animate={
-            isGain
-              ? { scale: [1, 1.08, 1] }
-              : isLoss
-              ? { scale: [1, 0.94, 1] }
-              : {}
-          }
-          transition={{ duration: 0.4 }}
-        >
-          ₫{display.toLocaleString('vi-VN')}
-        </motion.div>
-
-        {/* Delta indicator */}
-        <AnimatePresence>
-          {delta !== null && delta !== 0 && (
-            <motion.div
-              key={delta}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className={`text-xs font-semibold ${
-                isGain ? 'text-green-400' : 'text-red-400'
-              }`}
-            >
-              {isGain ? '▲' : '▼'} ₫{Math.abs(delta).toLocaleString('vi-VN')} vòng này
-            </motion.div>
-          )}
-        </AnimatePresence>
+    <div className="bg-gray-900/70 rounded-2xl border border-gray-800 p-4 text-center">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-left">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Banker</p>
+          {hostName && <p className="text-xs text-yellow-300 font-semibold truncate max-w-[120px]">{hostName}</p>}
+        </div>
+        {roomId && (
+          <div className="text-right">
+            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Mã phòng</p>
+            <div className="flex items-center justify-end gap-1.5 mt-0.5">
+              <p className="text-lg font-black font-mono text-yellow-400 tracking-widest">{roomId}</p>
+              <button
+                onClick={copyRoomId}
+                title="Sao chép mã phòng"
+                className="text-gray-500 hover:text-yellow-400 transition text-sm px-1.5 py-0.5 rounded hover:bg-yellow-400/10"
+              >
+                {copied ? (
+                  <motion.span
+                    key="ok"
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="text-green-400 text-xs font-bold"
+                  >
+                    ✓
+                  </motion.span>
+                ) : (
+                  <span title="Copy">📋</span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      <div className="mt-2">
+        <Balance balance={balance} isRolling={false} />
+        <p className="text-[10px] text-gray-600 mt-0.5">  số dư banker</p>
+      </div>
+
+      <AnimatePresence>
+        {delta !== null && delta !== 0 && (
+          <motion.p
+            key={delta}
+            initial={{ opacity: 0, y: 6, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6 }}
+            className={`text-sm font-bold mt-2 ${delta > 0 ? 'text-green-400' : 'text-red-400'}`}
+          >
+            {delta > 0 ? '' : ''} {Math.abs(delta).toLocaleString('vi-VN')}
+          </motion.p>
+        )}
+      </AnimatePresence>
     </div>
   );
-};
+}
